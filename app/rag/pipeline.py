@@ -1,8 +1,8 @@
 """Retrieval-augmented generation pipeline.
 
-Retrieves the most relevant chunks from Qdrant and asks Claude to answer using
+Retrieves the most relevant chunks from Qdrant and asks Groq to answer using
 *only* those chunks. Each chunk is passed as a `document` content block with
-citations enabled, so Claude returns verifiable citations pointing back to the
+citations enabled, so Groq returns verifiable citations pointing back to the
 exact source text — the key to a trustworthy, enterprise-grade RAG system.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import AsyncIterator, Dict, List, Optional, Tuple
 
-import anthropic
+from groq import Groq
 
 from app.config import get_settings
 from app.models import Citation, RetrievedChunk
@@ -27,48 +27,34 @@ SYSTEM_PROMPT = (
     "Be concise and direct."
 )
 
-_client: Optional[anthropic.Anthropic] = None
+_client: Optional[Groq] = None
 
 
-def _get_client() -> anthropic.Anthropic:
+def _get_client() -> Groq:
     global _client
     if _client is None:
         settings = get_settings()
-        # Resolves ANTHROPIC_API_KEY from the environment.
-        _client = anthropic.Anthropic(
-            api_key=settings.anthropic_api_key or None
-        )
+        _client = Groq(api_key=settings.groq_api_key or None)
     return _client
 
 
-def _build_documents(chunks: List[dict]) -> List[dict]:
-    """Turn retrieved chunks into citation-enabled document content blocks."""
+def _build_documents(chunks: List[dict]) -> str:
+    """Turn retrieved chunks into delimited prompt context."""
     docs = []
     for chunk in chunks:
         title = f"{chunk['source']} (chunk {chunk['chunk_index']})"
-        docs.append(
-            {
-                "type": "document",
-                "source": {
-                    "type": "text",
-                    "media_type": "text/plain",
-                    "data": chunk["text"],
-                },
-                "title": title,
-                "citations": {"enabled": True},
-            }
-        )
-    return docs
+        docs.append(f"[{title}]\n{chunk['text']}")
+    return "\n\n".join(docs)
 
 
 def _build_messages(
-    question: str, history: List[dict], documents: List[dict]
+    question: str, history: List[dict], documents: str
 ) -> List[dict]:
-    messages: List[dict] = []
+    messages: List[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for turn in history:
         messages.append({"role": turn["role"], "content": turn["content"]})
     # Documents + question go together in the final user turn.
-    messages.append({"role": "user", "content": documents + [{"type": "text", "text": question}]})
+    messages.append({"role": "user", "content": f"Documents:\n{documents}\n\nQuestion: {question}"})
     return messages
 
 
@@ -83,13 +69,10 @@ def _retrieve(
 def _request_kwargs(messages: List[dict]) -> dict:
     settings = get_settings()
     kwargs: dict = {
-        "model": settings.anthropic_model,
+        "model": settings.groq_model,
         "max_tokens": settings.max_tokens,
-        "system": SYSTEM_PROMPT,
         "messages": messages,
     }
-    if settings.enable_thinking:
-        kwargs["thinking"] = {"type": "adaptive"}
     return kwargs
 
 
@@ -129,23 +112,22 @@ def answer(
             "answer": "I couldn't find anything relevant in the knowledge base to answer that.",
             "citations": [],
             "sources": [],
-            "model": settings.anthropic_model,
+            "model": settings.groq_model,
             "usage": {},
         }
 
     documents = _build_documents(chunks)
     messages = _build_messages(question, history or [], documents)
-    response = _get_client().messages.create(**_request_kwargs(messages))
-
-    answer_text, citations = _parse_citations(response.content, chunks)
+    response = _get_client().chat.completions.create(**_request_kwargs(messages))
+    answer_text = response.choices[0].message.content or ""
     return {
         "answer": answer_text,
-        "citations": [c.model_dump() for c in citations],
+        "citations": [],
         "sources": [RetrievedChunk(**chunk).model_dump() for chunk in chunks],
         "model": response.model,
         "usage": {
-            "input_tokens": response.usage.input_tokens,
-            "output_tokens": response.usage.output_tokens,
+            "input_tokens": response.usage.prompt_tokens,
+            "output_tokens": response.usage.completion_tokens,
         },
     }
 
@@ -179,18 +161,14 @@ async def answer_stream(
     documents = _build_documents(chunks)
     messages = _build_messages(question, history or [], documents)
 
-    with _get_client().messages.stream(**_request_kwargs(messages)) as stream:
-        for event in stream:
-            if event.type == "content_block_delta" and event.delta.type == "text_delta":
-                yield {"type": "text", "text": event.delta.text}
-        final = stream.get_final_message()
-
-    _, citations = _parse_citations(final.content, chunks)
+    stream = _get_client().chat.completions.create(
+        **_request_kwargs(messages), stream=True
+    )
+    for event in stream:
+        if event.choices and event.choices[0].delta.content:
+            yield {"type": "text", "text": event.choices[0].delta.content}
     yield {
         "type": "done",
-        "citations": [c.model_dump() for c in citations],
-        "usage": {
-            "input_tokens": final.usage.input_tokens,
-            "output_tokens": final.usage.output_tokens,
-        },
+        "citations": [],
+        "usage": {},
     }

@@ -1,4 +1,4 @@
-"""API tests with the RAG pipeline mocked — no Qdrant/Claude needed."""
+"""API tests with the RAG pipeline mocked — no Qdrant/Groq needed."""
 
 from unittest.mock import patch
 
@@ -27,7 +27,7 @@ def test_chat_returns_answer_and_citations():
         "sources": [
             {"source": "policy.pdf", "chunk_index": 1, "score": 0.9, "text": "..."}
         ],
-        "model": "claude-sonnet-4-6",
+        "model": "openai/gpt-oss-120b",
         "usage": {"input_tokens": 100, "output_tokens": 20},
     }
     with patch("app.rag.pipeline.answer", return_value=fake):

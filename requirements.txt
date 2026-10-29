@@ -5,8 +5,8 @@ python-multipart==0.0.20          # file uploads
 pydantic==2.10.4
 pydantic-settings==2.7.1
 
-# --- Claude ---
-anthropic==0.69.0
+# --- Groq ---
+groq==0.31.0
 
 # --- Embeddings (local, free) ---
 sentence-transformers==3.3.1

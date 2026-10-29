@@ -3,18 +3,18 @@
 A production-grade Retrieval-Augmented Generation chatbot over **your own
 documents**. Drop files into `data/`, ingest them, and ask questions through a
 **REST API**, a **CLI**, or a **Streamlit web chat UI**. Every answer is
-**grounded with citations** that point back to the exact source text — so
-answers are verifiable, not hallucinated.
+grounded in retrieved document context, and the matching source chunks are
+returned with the response for inspection.
 
 ## Why this stack (cost-effective + enterprise-ready)
 
 | Concern | Choice | Why |
 |---|---|---|
-| Answering LLM | **Groq gpt-oss-120b** | Best quality/cost balance for RAG Q&A; configurable per request |
+| Answering LLM | **Groq `openai/gpt-oss-120b`** | Hosted chat model for RAG Q&A |
 | Embeddings | **`BAAI/bge-small-en-v1.5`** (local) | Runs on CPU, **zero per-token cost**, fully offline |
 | Vector store | **Qdrant** | Production vector DB; free in Docker, scales to managed cloud |
 | API | **FastAPI** | Async, streaming (SSE), OpenAPI docs, typed |
-| Grounding | **Groq native citations** | Answers cite exact source spans — auditable |
+| Grounding | **Retrieved source chunks** | The answer is constrained to the retrieved context |
 | Hardening | API-key auth, non-root container, JSON logs, healthchecks | Enterprise defaults |
 
 The **only** paid dependency is the Groq API. Embeddings and the vector store
@@ -37,8 +37,8 @@ cost nothing to run.
  (your docs)│ pdf/docx/md │            │ (overlapping) │  (bge)    │ (vectors)│
             └─────────────┘            └──────────────┘            └────┬─────┘
                                                                         │ top-k
-  question ──▶ /v1/chat ──▶ retrieve ──▶ Groq (Sonnet 4.6) ──▶ answer + citations
-                                         documents w/ citations enabled
+  question ──▶ /v1/chat ──▶ retrieve ──▶ Groq (gpt-oss-120b) ──▶ answer + sources
+                                         delimited document context
 ```
 
 ## Quick start (Docker — recommended)
@@ -87,7 +87,7 @@ same retrieval, grounding, and auth.
 
 ### 1. Web chat UI (Streamlit)
 
-A browser chat front-end with streaming answers, citation/source expanders, and
+A browser chat front-end with streaming answers, source expanders, and
 buttons to run ingestion and check health.
 
 ```bash
@@ -134,9 +134,7 @@ Response:
 ```json
 {
   "answer": "New employees receive 15 vacation days per year.",
-  "citations": [
-    {"cited_text": "new hires accrue 15 days", "source": "handbook.pdf", "chunk_index": 3}
-  ],
+  "citations": [],
   "sources": [{"source": "handbook.pdf", "chunk_index": 3, "score": 0.82, "text": "..."}],
   "model": "openai/gpt-oss-120b",
   "usage": {"input_tokens": 1203, "output_tokens": 48}
@@ -149,7 +147,7 @@ Same request body. Emits `data:` lines, each a JSON event:
 
 - `{"type": "sources", "sources": [...]}` — what was retrieved (first)
 - `{"type": "text", "text": "..."}` — answer tokens as they arrive
-- `{"type": "done", "citations": [...], "usage": {...}}` — final metadata
+- `{"type": "done", "citations": [], "usage": {}}` — final metadata
 
 ```bash
 curl -N -X POST http://localhost:8000/v1/chat/stream \
@@ -169,18 +167,19 @@ curl -X POST http://localhost:8000/v1/upload -F "file=@./contract.pdf"
 
 ## How grounding works
 
-Each retrieved chunk is sent to Groq as a `document` content block with
-`citations: {enabled: true}`. Groq is instructed to answer **only** from those
-documents and cite what it uses. The response's `citations` carry the exact
-`cited_text` and map back to the originating file and chunk — giving you an
-audit trail for every claim. If nothing relevant is retrieved, the bot says so
-instead of guessing.
+Each retrieved chunk is formatted as delimited text and sent to Groq in the
+chat-completions request. The system prompt instructs Groq to answer **only**
+from those documents and to identify the relevant text. The response's
+`sources` field contains the originating files, chunk indexes, scores, and
+retrieved text. Provider-native citation extraction is not currently enabled,
+so `citations` is an empty list. If nothing relevant is retrieved, the bot says
+so instead of guessing.
 
 ## Configuration
 
 All via environment variables / `.env` — see [`.env.example`](.env.example).
-Key knobs: `GROQ_MODEL`, `TOP_K`, `CHUNK_SIZE`, `SCORE_THRESHOLD`,
-``, `APP_API_KEYS`.
+Key knobs: `GROQ_API_KEY`, `GROQ_MODEL`, `MAX_TOKENS`, `TOP_K`, `CHUNK_SIZE`,
+`SCORE_THRESHOLD`, `APP_API_KEYS`, and `CORS_ORIGINS`.
 
 ## Testing
 
@@ -197,9 +196,8 @@ Tests mock Qdrant and Groq, so they run with no services and no API key.
   committed `.env`.
 - **Scaling**: the API is stateless — run multiple replicas behind a load
   balancer. Point them at a shared/managed Qdrant.
-- **Cost control**: switch `GROQ_MODEL` to `a smaller Groq model` for cheaper
-  high-volume Q&A, or `a larger Groq model` for maximum quality. Lower `TOP_K` to
-  reduce input tokens.
+- **Cost control**: lower `TOP_K` or `MAX_TOKENS` to reduce input and output
+  tokens.
 - **Observability**: logs are structured JSON on stdout — ship to your log
   platform.
 

@@ -24,7 +24,7 @@ def test_chat_sends_payload_and_parses_response():
                 "answer": "42 days.",
                 "citations": [{"cited_text": "42 days", "source": "p.pdf"}],
                 "sources": [],
-                "model": "claude-sonnet-4-6",
+                "model": "openai/gpt-oss-120b",
                 "usage": {},
             },
         )

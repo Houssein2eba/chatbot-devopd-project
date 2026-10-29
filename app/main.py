@@ -25,8 +25,8 @@ async def lifespan(app: FastAPI):
 
     if not settings.api_keys:
         logger.warning("APP_API_KEYS not set — API is OPEN (do not run like this in prod)")
-    if not settings.anthropic_api_key:
-        logger.warning("ANTHROPIC_API_KEY not set — chat endpoints will fail")
+    if not settings.groq_api_key:
+        logger.warning("GROQ_API_KEY not set — chat endpoints will fail")
 
     # Best-effort: make sure the collection exists so the first query is fast.
     try:

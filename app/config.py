@@ -22,13 +22,12 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- Claude / Anthropic ---
-    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-    anthropic_model: str = Field(default="claude-sonnet-4-6", alias="ANTHROPIC_MODEL")
+    # --- Groq ---
+    groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
+    groq_model: str = Field(default="openai/gpt-oss-120b", alias="GROQ_MODEL")
     max_tokens: int = Field(default=2048, alias="MAX_TOKENS")
     # Adaptive thinking trades latency/cost for harder reasoning. Off by default
     # for a Q&A bot; flip ENABLE_THINKING=true for analysis-heavy corpora.
-    enable_thinking: bool = Field(default=False, alias="ENABLE_THINKING")
 
     # --- Embeddings (local, free) ---
     embedding_model: str = Field(

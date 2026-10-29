@@ -115,5 +115,5 @@ def health():
         collection=settings.qdrant_collection,
         vectors=vectors,
         embedding_model=settings.embedding_model,
-        llm_model=settings.anthropic_model,
+        llm_model=settings.groq_model,
     )
